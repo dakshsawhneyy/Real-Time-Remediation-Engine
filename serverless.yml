@@ -1,0 +1,61 @@
+service: real-time-remediation-engine
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: ap-south-1
+  timeout: 10
+
+functions:
+  s3RemediationRobot:
+    handler: handler.remediate
+    description: "Receives non-compliant S3 events and makes the bucket private."
+    # Add permissions to it, it can modify any s3 bucket and get any s3 bucket
+    iamRoleStatements:
+      - Effect: "Allow"
+        Action: "s3:PutBucketPublicAccessBlock"
+        Resource: "arn:aws:s3:::*" # Allow it to fix any S3 bucket  
+
+    # The events block is handled by our EventBridge template listed below
+
+resources:
+  Resources:
+    # AWS Config looks for s3 buckets and if finds public, marks it as Non_Compliant
+    S3PublicReadProhibitedRule:
+      Type: AWS::Config::ConfigRule
+      Properties:
+        ConfigRuleName: "s3-bucket-public-read-prohibited"    
+        Source:
+          Owner: AWS
+          SourceIdentifier: "S3_BUCKET_PUBLIC_READ_PROHIBITED"    # Rule to check if any bucket is public
+        Scope:    
+          ComplianceResourceTypes:  
+            - "AWS::S3::Bucket"     # if foudn any bucket public, it marks it as Non_Compliant
+    # AWS EventBridge hears specific alarm and triggers the lambda function
+    ConfigComplianceEventRule:
+      Type: AWS::Events::Rule
+      Properties:
+        EventPattern:
+          source:
+            - "aws.config"
+          detail-type:
+              - "Config Rules Compliance Change"    # Whenever config of any bucket changes, event bridge gets triggered
+          detail:
+            messageType:
+              - "ComplianceChangeNotification"
+            configRuleName:
+              - "s3-bucket-public-read-prohibited"
+            newEvaluationResult:
+              complianceType:
+                - "NON_COMPLIANT"
+        Targets:
+          - Arn: !GetAtt S3RemediationRobotLambdaFunction.Arn
+            Id: "S3RemediationRobotTarget"
+    # Allow EventBridge to trigger lambda function. Provide it permission
+    LambdaInvokePermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        FunctionName: !GetAtt S3RemediationRobotLambdaFunction.Arn
+        Action: "lambda:InvokeFunction"   # What action it needs to perform
+        Principal: "events.amazonaws.com"   # who gave action AWS EventBridge 
+        SourceArn: !GetAtt ConfigComplianceEventRule.Arn
