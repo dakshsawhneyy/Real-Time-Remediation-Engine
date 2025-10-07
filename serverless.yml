@@ -31,8 +31,6 @@ resources:
         Scope:    
           ComplianceResourceTypes:  
             - "AWS::S3::Bucket"     # if foudn any bucket public, it marks it as Non_Compliant
-        InputParameters:
-          MaximumExecutionFrequency: "One_Hour"
     # AWS EventBridge hears specific alarm and triggers the lambda function
     ConfigComplianceEventRule:
       Type: AWS::Events::Rule
@@ -43,6 +41,8 @@ resources:
           detail-type:
               - "Config Rules Compliance Change"    # Whenever config of any bucket changes, event bridge gets triggered
           detail:
+            messageType:
+              - "ComplianceChangeNotification"
             configRuleName:
               - "s3-bucket-public-read-prohibited"
             newEvaluationResult:
@@ -59,3 +59,4 @@ resources:
         Action: "lambda:InvokeFunction"   # What action it needs to perform
         Principal: "events.amazonaws.com"   # who gave action AWS EventBridge 
         SourceArn: !GetAtt ConfigComplianceEventRule.Arn
+
